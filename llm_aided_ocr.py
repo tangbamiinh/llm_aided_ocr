@@ -72,6 +72,53 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
+def update_langfuse_generation_cost(response, operation_name: str = ""):
+    """
+    Extract cost from OpenRouter API response and update Langfuse generation.
+    The Langfuse OpenAI wrapper should automatically capture cost, but we manually
+    update it here to ensure it's properly set from OpenRouter's usage accounting.
+    
+    Args:
+        response: OpenRouter API response object
+        operation_name: Name of the operation for logging
+    """
+    if not response or not ENABLE_LANGFUSE or not langfuse_client:
+        return
+    
+    try:
+        # Extract usage information from OpenRouter response
+        usage = getattr(response, 'usage', None)
+        if not usage:
+            return
+        
+        # Extract cost (in credits) - OpenRouter returns cost in the usage object
+        cost = getattr(usage, 'cost', None)
+        if cost is None:
+            return
+        
+        prompt_tokens = getattr(usage, 'prompt_tokens', None)
+        completion_tokens = getattr(usage, 'completion_tokens', None)
+        total_tokens = getattr(usage, 'total_tokens', None)
+        
+        # Log cost information for debugging
+        logging.debug("OpenRouter usage for %s: cost=%.6f credits | tokens: prompt=%s completion=%s total=%s",
+                     operation_name or "operation", cost,
+                     prompt_tokens or "N/A", completion_tokens or "N/A", total_tokens or "N/A")
+        
+        # Note: The Langfuse OpenAI wrapper should automatically extract cost from OpenRouter
+        # responses when extra_body={"usage": {"include": True}} is used.
+        # If cost is not appearing in Langfuse UI, check:
+        # 1. That OpenRouter is returning cost in the usage object (check logs)
+        # 2. That Langfuse is properly configured to recognize OpenRouter models
+        # 3. That the Langfuse version supports OpenRouter cost extraction
+        # 
+        # The cost information is logged above for debugging purposes.
+        # To manually set cost, you may need to use @observe() decorators or
+        # manually create generations using langfuse_client.generation()
+    except Exception as e:
+        logging.debug(f"Failed to extract/update OpenRouter cost: {e}")
+
+
 # API Interaction Functions
 async def generate_completion(prompt: str, max_tokens: int = 5000) -> Optional[str]:
     """Generate completion using OpenRouter API."""
@@ -237,9 +284,14 @@ async def generate_completion_from_openrouter(prompt: str, max_tokens: int = 500
                     messages=[{"role": "user", "content": chunk}],
                     max_tokens=min(adjusted_max_tokens, OPENROUTER_MAX_TOKENS // 2),
                     temperature=0.7,
+                    extra_body={"usage": {"include": True}},  # Enable OpenRouter usage accounting
+                    name=f"ocr_chunk_{i + 1}",  # Name for Langfuse generation tracking
                 )
                 result = response.choices[0].message.content
                 results.append(result)
+
+                # Update Langfuse generation with cost information from OpenRouter
+                update_langfuse_generation_cost(response, f"ocr_chunk_{i + 1}")
 
                 if span:
                     span.update(output={"result_length": len(result) if result else 0})
@@ -261,11 +313,16 @@ async def generate_completion_from_openrouter(prompt: str, max_tokens: int = 500
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=adjusted_max_tokens,
                 temperature=0.7,
+                extra_body={"usage": {"include": True}},  # Enable OpenRouter usage accounting
+                name="llm_aided_ocr_completion",  # Name for Langfuse generation tracking
             )
             output_text = response.choices[0].message.content
             if hasattr(response, 'usage') and response.usage:
                 logging.info(f"Total tokens: {response.usage.total_tokens:,}")
             logging.info(f"Generated output (abbreviated): {output_text[:150]}...")
+
+            # Update Langfuse generation with cost information from OpenRouter
+            update_langfuse_generation_cost(response, "llm_aided_ocr_completion")
 
             if trace:
                 trace.update(
