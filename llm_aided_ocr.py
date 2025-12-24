@@ -25,7 +25,7 @@ except FileNotFoundError:
 
 OPENROUTER_API_KEY = config.get("OPENROUTER_API_KEY", default="", cast=str)
 OPENROUTER_BASE_URL = config.get("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1", cast=str)
-OPENROUTER_MODEL = config.get("OPENROUTER_MODEL", default="x-ai/grok-4-fast", cast=str)
+OPENROUTER_MODEL = config.get("OPENROUTER_MODEL", default="qwen/qwen-plus", cast=str)
 OPENROUTER_MAX_TOKENS = 12000  # Maximum allowed tokens for OpenRouter API
 TOKEN_BUFFER = 500  # Buffer to account for token estimation inaccuracies
 TOKEN_CUSHION = 300  # Don't use the full max tokens to avoid hitting the limit
